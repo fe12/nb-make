@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local-only user data lives on the filesystem and is never committed.
+/data/
+
+# Local scratch output from the check scripts
+/tmp/
+
+# Environment files hold project keys.
+.env
+.env.local
+.env*.local

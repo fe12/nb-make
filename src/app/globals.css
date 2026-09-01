@@ -1,0 +1,235 @@
+@import 'tailwindcss';
+
+/*
+ * The Tailwind scales are defined in terms of `--nb-*`, which each theme in
+ * `lib/themes.ts` supplies. Components keep using `ink-*` / `accent-*` and
+ * change colour the moment `data-theme` changes on <html>.
+ */
+@theme {
+  --color-ink-50: var(--nb-ink-50);
+  --color-ink-100: var(--nb-ink-100);
+  --color-ink-200: var(--nb-ink-200);
+  --color-ink-300: var(--nb-ink-300);
+  --color-ink-400: var(--nb-ink-400);
+  --color-ink-500: var(--nb-ink-500);
+  --color-ink-600: var(--nb-ink-600);
+  --color-ink-700: var(--nb-ink-700);
+  --color-ink-800: var(--nb-ink-800);
+  --color-ink-900: var(--nb-ink-900);
+
+  --color-accent-50: var(--nb-accent-50);
+  --color-accent-100: var(--nb-accent-100);
+  --color-accent-300: var(--nb-accent-300);
+  --color-accent-500: var(--nb-accent-500);
+  --color-accent-600: var(--nb-accent-600);
+  --color-accent-700: var(--nb-accent-700);
+  --color-accent-ink: var(--nb-accent-ink);
+
+  --color-danger-100: var(--nb-danger-100);
+  --color-danger-500: var(--nb-danger-500);
+  --color-danger-600: var(--nb-danger-600);
+
+  --color-paper: var(--nb-paper);
+  --color-sketch: var(--nb-sketch);
+
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-hand), 'Segoe Print', 'Bradley Hand', cursive;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace;
+}
+
+/* Fallback palette, so the page is never unstyled before the theme applies. */
+:root {
+  --nb-ink-50: #f7f9fb;
+  --nb-ink-100: #eef2f6;
+  --nb-ink-200: #dde5ee;
+  --nb-ink-300: #c4d1e0;
+  --nb-ink-400: #93a6bb;
+  --nb-ink-500: #6b7f96;
+  --nb-ink-600: #4e6076;
+  --nb-ink-700: #3a4959;
+  --nb-ink-800: #26313d;
+  --nb-ink-900: #171f28;
+  --nb-accent-50: #eef4fb;
+  --nb-accent-100: #d8e6f6;
+  --nb-accent-300: #8ab2dd;
+  --nb-accent-500: #3d75b0;
+  --nb-accent-600: #2f5d8a;
+  --nb-accent-700: #264c72;
+  --nb-accent-ink: #ffffff;
+  --nb-danger-100: #fbe6e6;
+  --nb-danger-500: #c04b4b;
+  --nb-danger-600: #a53c3c;
+  --nb-paper: #ffffff;
+  --nb-sketch: #2f5d8a;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--nb-ink-100);
+  color: var(--nb-ink-900);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* Faint ruled-paper wash, so the app reads as a desk rather than a form. */
+  background-image:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--nb-ink-300) 55%, transparent) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+/* ------------------------------------------------------------ hand-drawn */
+
+/*
+ * The uneven corner radii are the trick that makes a plain <div> read as
+ * something drawn by hand: opposite corners get different horizontal and
+ * vertical radii, so no two corners match.
+ */
+.sketch-box {
+  border-radius: 14px 5px 12px 6px / 6px 12px 5px 14px;
+}
+
+.sketch-box-alt {
+  border-radius: 6px 14px 5px 12px / 12px 5px 14px 6px;
+}
+
+.sketch-pill {
+  border-radius: 24px 10px 22px 12px / 12px 20px 10px 24px;
+}
+
+.sketch-border {
+  border-width: 1.5px;
+  border-style: solid;
+}
+
+/* A slightly lifted, off-square card — like a page laid on a desk. */
+.sketch-card {
+  border-radius: 14px 5px 12px 6px / 6px 12px 5px 14px;
+  border: 1.5px solid var(--nb-ink-300);
+  background: var(--nb-paper);
+  box-shadow: 2px 2px 0 color-mix(in srgb, var(--nb-ink-300) 45%, transparent);
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.sketch-card-hover:hover {
+  transform: translate(-1px, -2px) rotate(-0.35deg);
+  box-shadow: 4px 5px 0 color-mix(in srgb, var(--nb-ink-400) 40%, transparent);
+}
+
+/* Washi tape holding a card to the page. */
+.tape {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 68px;
+  height: 18px;
+  transform: translateX(-50%) rotate(-2.5deg);
+  background: color-mix(in srgb, var(--nb-accent-300) 42%, transparent);
+  border-left: 1px dashed color-mix(in srgb, var(--nb-accent-600) 30%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--nb-accent-600) 30%, transparent);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* Wobbly underline for the active step. */
+.doodle-underline {
+  position: relative;
+}
+.doodle-underline::after {
+  content: '';
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  bottom: -3px;
+  height: 5px;
+  background: var(--nb-sketch);
+  opacity: 0.55;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 6' preserveAspectRatio='none'%3E%3Cpath d='M0 4 Q 12 1.5 24 3.4 T 49 3 T 74 3.8 T 100 2.4' stroke='black' stroke-width='2.2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+}
+
+/* Ring binding down the left of the workspace header. */
+.punch-holes {
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--nb-ink-300) 90%, transparent) 0 3.5px,
+    transparent 3.6px
+  );
+  background-size: 22px 22px;
+  background-position: 0 6px;
+  background-repeat: repeat-x;
+}
+
+.paper-surface {
+  background-color: var(--nb-ink-100);
+  background-image: radial-gradient(circle at 1px 1px, var(--nb-ink-200) 1px, transparent 0);
+  background-size: 16px 16px;
+}
+
+/* Kept for compatibility with the earlier class name. */
+.surface-grid {
+  background-color: var(--nb-ink-100);
+  background-image: radial-gradient(circle at 1px 1px, var(--nb-ink-200) 1px, transparent 0);
+  background-size: 16px 16px;
+}
+
+/* ---------------------------------------------------------------- inputs */
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+input[type='range'] {
+  accent-color: var(--nb-accent-500);
+}
+
+input[type='color'] {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type='color']::-webkit-color-swatch {
+  border: 1.5px solid var(--nb-ink-300);
+  border-radius: 6px 3px 5px 3px / 3px 5px 3px 6px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--nb-ink-300);
+  border-radius: 999px;
+  border: 2px solid var(--nb-ink-100);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--nb-ink-400);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sketch-card,
+  .sketch-card-hover:hover {
+    transform: none;
+    transition: none;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+    background-image: none;
+  }
+}
