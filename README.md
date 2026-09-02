@@ -204,6 +204,17 @@ and avoids font licensing, at the cost of exact glyph shapes being up to the
 reader. Some lightweight PDF *thumbnailers* do not ship substitutes and will
 show such text as blank — real viewers and printers render it correctly.
 
+**The interface is scaled to 125%.** The design reads a shade too small at
+native size, so `--app-zoom` in `globals.css` bakes in what Chrome's 125% zoom
+looked like. It is one variable — change it there and the whole UI follows.
+
+Two consequences are handled rather than lived with: viewport units still
+resolve against the *unzoomed* window, so anything sized to the screen uses
+`--screen-h` instead of `100vh`; and printing resets `--app-zoom` to 1 so paper
+output is unaffected. Pointer maths needed no changes — `getBoundingClientRect()`
+and `clientX` are both in the zoomed space, so the canvas conversions, which are
+ratios of the two, are scale-invariant.
+
 **Print at 100%.** Any "fit to page" or "shrink oversized pages" setting will
 change the ruling spacing, which defeats the point of a 5 mm grid.
 

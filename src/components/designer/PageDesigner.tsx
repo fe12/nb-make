@@ -137,7 +137,7 @@ export function PageDesigner() {
   /* ------------------------------------------------------------ render */
 
   return (
-    <div className="mx-auto grid w-full max-w-[1800px] gap-4 px-5 py-4 lg:h-[calc(100vh-8.5rem)] lg:grid-cols-[230px_minmax(0,1fr)_360px]">
+    <div className="mx-auto grid w-full max-w-[1800px] gap-4 px-5 py-4 lg:h-[calc(var(--screen-h)-10rem)] lg:grid-cols-[230px_minmax(0,1fr)_360px]">
       {/* Designs list */}
       <aside className="space-y-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
         <Panel

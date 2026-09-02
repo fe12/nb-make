@@ -63,12 +63,41 @@
   --nb-sketch: #2f5d8a;
 }
 
-html,
-body {
+/*
+ * Interface scale.
+ *
+ * The UI was designed a notch too small and reads correctly at Chrome's 125%,
+ * so that is baked in rather than left for each person to set. `zoom` is used
+ * in preference to scaling the type scale because there are ~200 arbitrary
+ * `text-[13px]`-style utilities: a root font-size change would scale the
+ * rem-based spacing and leave every one of those behind.
+ *
+ * Two things `zoom` does not do for you:
+ *
+ *   - Viewport units still resolve against the *unzoomed* viewport, so `100vh`
+ *     comes out 25% too tall. Anything sized to the window uses `--screen-h`.
+ *   - A `position: fixed` box's `inset: 0` resolves against a containing block
+ *     one scrollbar-width short in *both* axes. Horizontally that is correct
+ *     (the missing strip is the scrollbar), but vertically it leaves a gap, so
+ *     the modal overlay sets its height explicitly.
+ *
+ * Pointer maths is safe: `getBoundingClientRect()` and `clientX` are both in
+ * the zoomed space, so the canvas code's `(clientX - rect.left) / rect.width`
+ * is scale-invariant. Verified with a real drag, not assumed.
+ */
+:root {
+  --app-zoom: 1.25;
+  /* One viewport height, expressed in the zoomed coordinate space. */
+  --screen-h: calc(100vh / var(--app-zoom));
+}
+
+html {
   height: 100%;
 }
 
 body {
+  zoom: var(--app-zoom);
+  min-height: var(--screen-h);
   background-color: var(--nb-ink-100);
   color: var(--nb-ink-900);
   font-family: var(--font-sans);
@@ -228,6 +257,14 @@ input[type='color']::-webkit-color-swatch {
 }
 
 @media print {
+  /*
+   * Printing is at the paper's own scale. Resetting the one variable also
+   * restores `--screen-h` to a true 100vh, so nothing has to be undone twice.
+   */
+  :root {
+    --app-zoom: 1;
+  }
+
   body {
     background: white;
     background-image: none;

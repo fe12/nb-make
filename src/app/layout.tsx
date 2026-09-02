@@ -41,7 +41,8 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${body.variable} ${hand.variable}`}>
-      <body className="min-h-screen antialiased">
+      {/* Height comes from `--screen-h` in globals.css, which corrects 100vh for the app zoom. */}
+      <body className="antialiased">
         {/*
           Auth wraps Sync, which wraps everything: the sync engine reacts to the
           session, and the editor's own store sits inside both so a push can be
@@ -50,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <AuthProvider>
             <SyncProvider>
-              <div className="flex min-h-screen flex-col">
+              <div className="flex min-h-[var(--screen-h)] flex-col">
                 <header className="sticky top-0 z-40 border-b-2 border-dashed border-ink-300 bg-paper/90 backdrop-blur">
                   <div className="punch-holes h-2 w-full opacity-70" aria-hidden />
                   <div className="mx-auto flex h-14 w-full max-w-[1800px] items-center gap-4 px-5">

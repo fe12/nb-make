@@ -11,7 +11,7 @@ import { AppSidebar, MobileNav } from '@/components/shell/AppSidebar';
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto flex w-full max-w-[1800px] flex-1">
-      <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-56 shrink-0 border-r-2 border-dashed border-ink-200 md:block">
+      <aside className="sticky top-16 hidden h-[calc(var(--screen-h)-4rem)] w-56 shrink-0 border-r-2 border-dashed border-ink-200 md:block">
         <AppSidebar />
       </aside>
       <div className="min-w-0 flex-1">

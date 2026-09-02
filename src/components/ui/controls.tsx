@@ -638,10 +638,23 @@ export function Modal({
 
   if (!open) return null;
 
+  /*
+   * The overlay takes its height from `--screen-h` rather than `inset-0`.
+   *
+   * Under the app zoom, a fixed element's `inset: 0` resolves against a
+   * containing block one scrollbar-width short in *both* axes. Horizontally
+   * that is right -- the missing strip is the scrollbar itself -- but
+   * vertically it left a 12px untinted band along the bottom. So the
+   * horizontal stretch is kept (`inset-x-0`) and only the height is corrected.
+   *
+   * The backdrop repeats that geometry rather than being `absolute inset-0`
+   * inside this box: this element scrolls, and an absolute child would be
+   * inset by its scrollbar, losing another 12px off the right.
+   */
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+    <div className="fixed inset-x-0 top-0 z-50 flex h-[var(--screen-h)] items-start justify-center overflow-y-auto p-4 sm:p-8">
       <div
-        className="fixed inset-0 bg-ink-900/25 backdrop-blur-[2px]"
+        className="fixed inset-x-0 top-0 h-[var(--screen-h)] bg-ink-900/25 backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden
       />
@@ -661,7 +674,7 @@ export function Modal({
           </h2>
           {description && <p className="mt-0.5 text-xs text-ink-500">{description}</p>}
         </header>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
+        <div className="max-h-[calc(var(--screen-h)*0.7)] overflow-y-auto px-5 py-4">{children}</div>
         {footer && (
           <footer className="flex items-center justify-end gap-2 border-t-2 border-dashed border-ink-200 px-5 py-3">
             {footer}

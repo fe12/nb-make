@@ -195,7 +195,7 @@ export function OrderEditor() {
           {compiled.pages.length === 0 ? (
             <p className="px-1 py-6 text-center text-[11px] text-ink-400">Nothing to preview yet.</p>
           ) : (
-            <ul className="grid max-h-[70vh] grid-cols-3 gap-2.5 overflow-y-auto">
+            <ul className="grid max-h-[calc(var(--screen-h)*0.7)] grid-cols-3 gap-2.5 overflow-y-auto">
               {compiled.pages.map((page) => (
                 <li key={`${page.index}`}>
                   <PageThumb
