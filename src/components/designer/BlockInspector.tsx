@@ -144,6 +144,23 @@ export function BlockInspector({
   );
 }
 
+/** Alignment stops as fractions of the free space along an axis. */
+const ALIGN_STOPS_X = [
+  { value: 0, label: 'Left', title: 'Flush with the left edge' },
+  { value: 1, label: '\u00bc', title: 'Centred on the left quarter' },
+  { value: 2, label: 'Center', title: 'Centred on the axis \u2014 x = (W \u2212 w) / 2' },
+  { value: 3, label: '\u00be', title: 'Centred on the right quarter' },
+  { value: 4, label: 'Right', title: 'Flush with the right edge' },
+] as const;
+
+const ALIGN_STOPS_Y = [
+  { value: 0, label: 'Top', title: 'Flush with the top edge' },
+  { value: 1, label: '\u00bc', title: 'Centred on the top quarter' },
+  { value: 2, label: 'Middle', title: 'Centred on the axis \u2014 y = (H \u2212 h) / 2' },
+  { value: 3, label: '\u00be', title: 'Centred on the bottom quarter' },
+  { value: 4, label: 'Bottom', title: 'Flush with the bottom edge' },
+] as const;
+
 function GeometryFields({
   block,
   content,
@@ -155,6 +172,10 @@ function GeometryFields({
 }) {
   // The inspector speaks millimetres because that is what a printed page is
   // measured in; the model keeps fractions so the design can be retargeted.
+  // Percent is offered because the fractions *are* the stored value \u2014 25% is
+  // 25% of the content box at every trim size.
+  const [unit, setUnit] = useState<'mm' | 'pct'>('mm');
+
   const toMm = (fraction: number, axis: 'w' | 'h') => fraction * content[axis];
   const toFraction = (mm: number, axis: 'w' | 'h') =>
     content[axis] > 0 ? mm / content[axis] : 0;
@@ -162,42 +183,100 @@ function GeometryFields({
   const set = (patch: Partial<Block['rect']>) =>
     onChange({ ...block, rect: { ...block.rect, ...patch } });
 
+  /* Alignment: place the block so its centre sits on the chosen stop. With
+   * A in 0..4, pos = A \u00b7 (1 \u2212 size) / 4 \u2014 A = 2 is the true centre
+   * ((1 \u2212 size) / 2, equal gaps either side), A = 0/4 are flush edges, and the
+   * quarters land between. A block wider than the content box still works:
+   * the formula centres it with negative gaps. */
+  const align = (axis: 'x' | 'y', stop: number) => {
+    const size = axis === 'x' ? block.rect.w : block.rect.h;
+    set({ [axis]: (stop * (1 - size)) / 4 } as Partial<Block['rect']>);
+  };
+
+  /** The stop the block already sits on, or -1 when it is off-grid. */
+  const stopOf = (axis: 'x' | 'y'): number => {
+    const size = axis === 'x' ? block.rect.w : block.rect.h;
+    const pos = axis === 'x' ? block.rect.x : block.rect.y;
+    const free = 1 - size;
+    if (Math.abs(free) < 1e-6) return Math.abs(pos) < 1e-6 ? 2 : -1;
+    const stop = (pos * 4) / free;
+    return Math.abs(stop - Math.round(stop)) < 0.005 ? Math.round(stop) : -1;
+  };
+
+  const read = (fraction: number, axis: 'w' | 'h') =>
+    unit === 'mm' ? round(toMm(fraction, axis)) : round(fraction * 100);
+  const write = (value: number, axis: 'w' | 'h') =>
+    unit === 'mm' ? toFraction(value, axis) : value / 100;
+  const suffix = unit === 'mm' ? 'mm' : '%';
+  const step = unit === 'mm' ? 0.5 : 1;
+
   return (
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="X">
-        <NumberInput
-          value={round(toMm(block.rect.x, 'w'))}
-          step={0.5}
-          suffix="mm"
-          onChange={(mm) => set({ x: toFraction(mm, 'w') })}
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium text-ink-500">Show in</span>
+        <Segmented
+          value={unit}
+          onChange={setUnit}
+          options={[
+            { value: 'mm', label: 'Millimetres' },
+            { value: 'pct', label: 'Percent' },
+          ]}
+          className="w-44"
         />
-      </Field>
-      <Field label="Y">
-        <NumberInput
-          value={round(toMm(block.rect.y, 'h'))}
-          step={0.5}
-          suffix="mm"
-          onChange={(mm) => set({ y: toFraction(mm, 'h') })}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="X (left edge)">
+          <NumberInput
+            value={read(block.rect.x, 'w')}
+            step={step}
+            suffix={suffix}
+            onChange={(v) => set({ x: write(v, 'w') })}
+          />
+        </Field>
+        <Field label="Y (top edge)">
+          <NumberInput
+            value={read(block.rect.y, 'h')}
+            step={step}
+            suffix={suffix}
+            onChange={(v) => set({ y: write(v, 'h') })}
+          />
+        </Field>
+        <Field label="Width">
+          <NumberInput
+            value={read(block.rect.w, 'w')}
+            min={unit === 'mm' ? 1 : 0.5}
+            step={step}
+            suffix={suffix}
+            onChange={(v) => set({ w: write(v, 'w') })}
+          />
+        </Field>
+        <Field label="Height">
+          <NumberInput
+            value={read(block.rect.h, 'h')}
+            min={unit === 'mm' ? 1 : 0.5}
+            step={step}
+            suffix={suffix}
+            onChange={(v) => set({ h: write(v, 'h') })}
+          />
+        </Field>
+      </div>
+
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-medium text-ink-500">
+          Align in the content box
+        </span>
+        <Segmented
+          value={stopOf('x')}
+          onChange={(stop) => align('x', stop)}
+          options={[...ALIGN_STOPS_X]}
         />
-      </Field>
-      <Field label="Width">
-        <NumberInput
-          value={round(toMm(block.rect.w, 'w'))}
-          min={1}
-          step={0.5}
-          suffix="mm"
-          onChange={(mm) => set({ w: toFraction(mm, 'w') })}
+        <Segmented
+          value={stopOf('y')}
+          onChange={(stop) => align('y', stop)}
+          options={[...ALIGN_STOPS_Y]}
         />
-      </Field>
-      <Field label="Height">
-        <NumberInput
-          value={round(toMm(block.rect.h, 'h'))}
-          min={1}
-          step={0.5}
-          suffix="mm"
-          onChange={(mm) => set({ h: toFraction(mm, 'h') })}
-        />
-      </Field>
+      </div>
     </div>
   );
 }
