@@ -73,6 +73,15 @@ export async function exportNotebookPdf(options: ExportOptions): Promise<Uint8Ar
   const out = await PDFDocument.create();
   applyMetadata(out, notebook);
 
+  // pdf-lib embeds fonts and images lazily: `embedFont`/`embedPng` only reserve
+  // an object number, and the object itself is not registered in the document's
+  // context until `save()`/`flush()` runs. `embedPdf` copies pages by walking
+  // that context, so an unflushed asset copies across as a dangling reference
+  // and is silently dropped by PDF viewers — pictures placed on pages vanished
+  // from the final file this way. Flushing the intermediate document first
+  // makes the pages reference real, copyable objects.
+  await inner.flush();
+
   const embedded = await out.embedPdf(inner, [...keyToIndex.values()]);
   const byKey = new Map<string, PDFEmbeddedPage>();
   for (const [key, index] of keyToIndex) byKey.set(key, embedded[index]);
