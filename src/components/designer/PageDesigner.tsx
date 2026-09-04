@@ -25,6 +25,13 @@ import {
   Toggle,
 } from '@/components/ui/controls';
 import { useNotebook } from '@/lib/client/store';
+import {
+  deleteSavedPage,
+  insertFromLibrary,
+  saveToLibrary,
+  useSavedPages,
+  type SavedPage,
+} from '@/lib/client/pagelibrary';
 import { compileTemplate } from '@/lib/compile/page';
 import { newId } from '@/lib/ids';
 import { presetsByCategory } from '@/lib/presets';
@@ -40,6 +47,8 @@ export function PageDesigner() {
   const [tab, setTab] = useState<'page' | 'blocks'>('page');
   const [addingPreset, setAddingPreset] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<PageTemplate | null>(null);
+  const [libraryNotice, setLibraryNotice] = useState<string | null>(null);
+  const savedPages = useSavedPages();
 
   const template =
     notebook.templates.find((t) => t.id === selectedTemplateId) ?? notebook.templates[0] ?? null;
@@ -89,10 +98,31 @@ export function PageDesigner() {
       ...structuredClone(source),
       id: newId('tpl'),
       name: `${source.name} copy`,
+      // A duplicate is meant to fork the design, so it must not keep updating
+      // the library entry its source is linked to.
+      libraryId: undefined,
       blocks: source.blocks.map((b) => ({ ...structuredClone(b), id: newId('blk') })),
     };
     update((draft) => ({ ...draft, templates: [...draft.templates, copy] }));
     setSelectedTemplateId(copy.id);
+  };
+
+  /** Snapshots the current design into the browser-wide page library. */
+  const saveCurrentToLibrary = () => {
+    if (!template) return;
+    const { entry, libraryId } = saveToLibrary(template);
+    if (template.libraryId !== libraryId) {
+      patchTemplate(template.id, (t) => ({ ...t, libraryId }), false);
+    }
+    setLibraryNotice(`Saved “${entry.name}” to your page library.`);
+  };
+
+  const addSavedPages = (entries: SavedPage[]) => {
+    if (entries.length === 0) return;
+    const built = entries.map(insertFromLibrary);
+    update((draft) => ({ ...draft, templates: [...draft.templates, ...built] }));
+    setSelectedTemplateId(built[0].id);
+    setAddingPreset(false);
   };
 
   const deleteTemplate = (id: string) => {
@@ -204,6 +234,9 @@ export function PageDesigner() {
                 <Button size="sm" onClick={() => duplicateTemplate(template.id)}>
                   Duplicate
                 </Button>
+                <Button size="sm" onClick={saveCurrentToLibrary}>
+                  {template.libraryId ? 'Update in library' : 'Save to library'}
+                </Button>
                 <Button size="sm" variant="ghost" onClick={() => setTemplateToDelete(template)}>
                   Delete
                 </Button>
@@ -249,6 +282,13 @@ export function PageDesigner() {
 
             {compiled && compiled.warnings.length > 0 && (
               <Notice tone="warn">{[...new Set(compiled.warnings)].join(' ')}</Notice>
+            )}
+
+            {libraryNotice && (
+              <Notice>
+                {libraryNotice} It is available from “Add → Saved pages” in every
+                notebook on this browser.
+              </Notice>
             )}
           </div>
         )}
@@ -358,6 +398,9 @@ export function PageDesigner() {
         open={addingPreset}
         onClose={() => setAddingPreset(false)}
         onAdd={addTemplates}
+        onAddSaved={addSavedPages}
+        savedPages={savedPages}
+        onDeleteSaved={(id) => deleteSavedPage(id)}
         pageSize={notebook.pageSize}
       />
       <Modal
@@ -588,23 +631,38 @@ function PresetModal({
   open,
   onClose,
   onAdd,
+  onAddSaved,
+  savedPages,
+  onDeleteSaved,
   pageSize,
 }: {
   open: boolean;
   onClose: () => void;
   onAdd: (templates: PageTemplate[]) => void;
+  onAddSaved: (entries: SavedPage[]) => void;
+  savedPages: SavedPage[];
+  onDeleteSaved: (id: string) => void;
   pageSize: PageTemplate['authoredFor'];
 }) {
-  const [chosen, setChosen] = useState<string[]>([]);
+  const [chosenPresets, setChosenPresets] = useState<string[]>([]);
+  const [chosenPages, setChosenPages] = useState<string[]>([]);
   const groups = presetsByCategory();
+  const total = chosenPresets.length + chosenPages.length;
 
   const add = () => {
+    // Saved pages first, so a reused design keeps its place ahead of presets
+    // in the notebook's design list.
+    const fromLibrary = savedPages.filter((page) => chosenPages.includes(page.id));
+    if (fromLibrary.length > 0) onAddSaved(fromLibrary);
+
     const built = groups
       .flatMap((group) => group.presets)
-      .filter((preset) => chosen.includes(preset.id))
+      .filter((preset) => chosenPresets.includes(preset.id))
       .map((preset) => preset.build({ pageSize }));
-    onAdd(built);
-    setChosen([]);
+    if (built.length > 0) onAdd(built);
+
+    setChosenPresets([]);
+    setChosenPages([]);
   };
 
   return (
@@ -612,30 +670,58 @@ function PresetModal({
       open={open}
       onClose={onClose}
       title="Add page designs"
-      description="Presets are copied into the notebook — edit them freely afterwards."
+      description="Presets and saved pages are copied into the notebook — edit them freely afterwards."
       width="max-w-3xl"
       footer={
         <>
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={add} disabled={chosen.length === 0}>
-            Add {chosen.length || ''} design{chosen.length === 1 ? '' : 's'}
+          <Button variant="primary" onClick={add} disabled={total === 0}>
+            Add {total || ''} design{total === 1 ? '' : 's'}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
+        {savedPages.length > 0 && (
+          <div>
+            <SectionLabel>Your saved pages</SectionLabel>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {savedPages.map((page) => (
+                <li key={page.id}>
+                  <SavedPageRow
+                    page={page}
+                    selected={chosenPages.includes(page.id)}
+                    notebookPageSize={pageSize}
+                    onToggle={() =>
+                      setChosenPages((current) =>
+                        current.includes(page.id)
+                          ? current.filter((id) => id !== page.id)
+                          : [...current, page.id]
+                      )
+                    }
+                    onDelete={() => {
+                      onDeleteSaved(page.id);
+                      setChosenPages((current) => current.filter((id) => id !== page.id));
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {groups.map((group) => (
           <div key={group.category}>
             <SectionLabel>{group.category}</SectionLabel>
             <ul className="grid gap-2 sm:grid-cols-2">
               {group.presets.map((preset) => {
-                const active = chosen.includes(preset.id);
+                const active = chosenPresets.includes(preset.id);
                 return (
                   <li key={preset.id}>
                     <button
                       type="button"
                       onClick={() =>
-                        setChosen((current) =>
+                        setChosenPresets((current) =>
                           current.includes(preset.id)
                             ? current.filter((id) => id !== preset.id)
                             : [...current, preset.id]
@@ -662,6 +748,86 @@ function PresetModal({
       </div>
     </Modal>
   );
+}
+
+/**
+ * A library entry in the Add-designs picker. The preview compiles the saved
+ * template against the *notebook's* page size, so what you see is the adapted
+ * result, not the size it was designed at.
+ */
+function SavedPageRow({
+  page,
+  selected,
+  notebookPageSize,
+  onToggle,
+  onDelete,
+}: {
+  page: SavedPage;
+  selected: boolean;
+  notebookPageSize: PageTemplate['authoredFor'];
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const { notebook, assets, math } = useNotebook();
+  const size = resolvePageSize(notebookPageSize);
+
+  const compiled = useMemo(
+    () =>
+      compileTemplate(page.template, {
+        size,
+        margins: notebook.margins,
+        assets,
+        math,
+        palette: notebook.palette,
+      }),
+    [page.template, size, notebook.margins, notebook.palette, assets, math]
+  );
+
+  const authored = resolvePageSize(page.template.authoredFor);
+  const adapts =
+    Math.abs(authored.w - size.w) > 0.05 || Math.abs(authored.h - size.h) > 0.05;
+
+  return (
+    <div
+      className={clsx(
+        'flex items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors',
+        selected ? 'border-accent-500 bg-accent-50' : 'border-ink-200 hover:border-ink-300'
+      )}
+    >
+      <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <div className="shrink-0">
+          <PageThumb ops={compiled.ops} size={size} height={64} selected={selected} />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-[12.5px] font-medium text-ink-900">{page.name}</div>
+          <div className="mt-0.5 text-[11px] leading-snug text-ink-500">
+            {adapts ? (
+              <>
+                Designed for {labelSize(page.template.authoredFor)} — adapts to this
+                notebook's {labelSize(notebookPageSize)}
+              </>
+            ) : (
+              <>Sized for this notebook</>
+            )}
+          </div>
+        </div>
+      </button>
+      <Button
+        size="sm"
+        variant="ghost"
+        title="Remove from your page library"
+        onClick={onDelete}
+      >
+        ✕
+      </Button>
+    </div>
+  );
+}
+
+function labelSize(spec: PageTemplate['authoredFor']): string {
+  return spec.name === 'Custom'
+    ? `${round(resolvePageSize(spec).w)}×${round(resolvePageSize(spec).h)} mm`
+    : spec.name;
 }
 
 const round = (n: number) => Math.round(n * 10) / 10;

@@ -202,6 +202,13 @@ export const zPageTemplate = z.object({
   pattern: zPattern,
   blocks: z.array(zBlock).default([]),
   /**
+   * The page-library entry this design is linked to, if any. Set when the
+   * design was inserted from the library or saved to it, so "Save to library"
+   * updates that entry instead of piling up copies. Deliberately not part of
+   * the visual design: it is provenance, like `presetId`.
+   */
+  libraryId: z.string().optional(),
+  /**
    * The page size this template's proportions were designed against. Used to
    * decide type scaling when it is rendered at another size.
    */

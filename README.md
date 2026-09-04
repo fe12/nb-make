@@ -55,6 +55,11 @@ shown: the scripts parse it without a URL parser, so no escaping is needed.
 1. **Design pages** — build page designs from a ruling (dot grid, ruled,
    isometric, music staves, …) plus optional blocks (text, LaTeX, images,
    tables, checklists, nested pattern areas). Drag blocks directly on the page.
+   **Save to library** lifts any design into a browser-wide page library, so
+   the same page can be dropped into any notebook: inserting copies it in and
+   it adapts to that notebook's trim size — block rects are fractions and type
+   scales with the content box, so an A4 design lands sensibly at A5 and vice
+   versa. Saved pages travel with import/export bundles; they are not synced.
 2. **Build notebook** — put designs in order, set repeat counts, and drop in
    parametric generators that expand into many pages at once (a year of
    calendars, a month of habit trackers).
@@ -117,6 +122,7 @@ src/
     imposition/            slot generation, page ordering, printer's marks
     export/pdf.ts          two-pass PDF assembly
     client/storage.ts      localStorage + IndexedDB, import/export bundles
+    client/pagelibrary.ts  the reusable page library (localStorage)
     client/export.ts       builds the PDF in the browser
     client/store.tsx       editor state, autosave, undo, math cache
     client/sync.ts         revision-guarded push/pull/merge + unload beacon

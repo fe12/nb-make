@@ -9,6 +9,12 @@
  */
 import { newId } from '../ids';
 import type { AssetIndex, AssetMeta } from '../assets';
+import {
+  listSavedPages,
+  savedPageExists,
+  writeSavedPage,
+  type SavedPage,
+} from './pagelibrary';
 import { zNotebook, type Notebook, type NotebookSummary } from '../types/notebook';
 import { defaultPageSize, resolvePageSize } from '../units';
 
@@ -316,23 +322,25 @@ export interface NotebookBundle {
   notebooks: Notebook[];
   /** Base64 image bytes, keyed by asset id, for assets the notebooks use. */
   assets: Record<string, { meta: AssetMeta; data: string }>;
+  /**
+   * The page library, so a bundle carries reusable designs alongside the
+   * notebooks. Optional: older bundles predate it.
+   */
+  pages?: Array<Pick<SavedPage, 'id' | 'name' | 'template'>>;
 }
 
 export async function exportBundle(ids: string[]): Promise<NotebookBundle> {
   const notebooks = ids.map(readNotebook).filter((n): n is Notebook => n !== null);
 
-  // Only ship the images these notebooks actually reference — exporting one
-  // notebook should not drag the whole image library along.
+  // Only ship the images these notebooks — or the page library travelling with
+  // them — actually reference. Exporting one notebook should not drag the
+  // whole image library along.
   const needed = new Set<string>();
   for (const notebook of notebooks) {
-    for (const template of notebook.templates) {
-      for (const block of template.blocks) {
-        if (block.content.type === 'image' && block.content.assetId) {
-          needed.add(block.content.assetId);
-        }
-      }
-    }
+    for (const template of notebook.templates) collectTemplateAssets(template, needed);
   }
+  const pages = listSavedPages();
+  for (const page of pages) collectTemplateAssets(page.template, needed);
 
   const index = await listAssets();
   const assets: NotebookBundle['assets'] = {};
@@ -348,13 +356,27 @@ export async function exportBundle(ids: string[]): Promise<NotebookBundle> {
     exportedAt: new Date().toISOString(),
     notebooks,
     assets,
+    pages: pages.map(({ id, name, template }) => ({ id, name, template })),
   };
+}
+
+/** Asset ids referenced by a template's image blocks. */
+function collectTemplateAssets(
+  template: { blocks: Array<{ content: { type: string; assetId?: string } }> },
+  into: Set<string>
+): void {
+  for (const block of template.blocks) {
+    if (block.content.type === 'image' && block.content.assetId) {
+      into.add(block.content.assetId);
+    }
+  }
 }
 
 export interface ImportResult {
   imported: Notebook[];
   skipped: number;
   assetCount: number;
+  pageCount: number;
 }
 
 /**
@@ -386,6 +408,26 @@ export async function importBundle(raw: unknown): Promise<ImportResult> {
     }
   }
 
+  // Library pages come in under fresh ids when they collide, with image asset
+  // ids remapped exactly like notebook templates. Notebooks linked to an
+  // imported page keep the link via `libraryId` remapping below.
+  const pageIdMap = new Map<string, string>();
+  let pageCount = 0;
+  const now = new Date().toISOString();
+  for (const page of bundle?.pages ?? []) {
+    if (!page || typeof page.id !== 'string' || !page.template) continue;
+    const targetId = savedPageExists(page.id) ? newId('pg') : page.id;
+    pageIdMap.set(page.id, targetId);
+    writeSavedPage({
+      id: targetId,
+      name: typeof page.name === 'string' ? page.name : 'Untitled page',
+      template: remapTemplate(page.template, assetIdMap, targetId),
+      createdAt: now,
+      updatedAt: now,
+    });
+    pageCount++;
+  }
+
   const imported: Notebook[] = [];
   let skipped = 0;
 
@@ -396,29 +438,47 @@ export async function importBundle(raw: unknown): Promise<ImportResult> {
       continue;
     }
 
-    const now = new Date().toISOString();
     const remapped: Notebook = {
       ...notebook,
       id: newId('nb'),
       createdAt: notebook.createdAt || now,
       updatedAt: now,
-      templates: notebook.templates.map((template) => ({
-        ...template,
-        blocks: template.blocks.map((block) =>
-          block.content.type === 'image' && assetIdMap.has(block.content.assetId)
-            ? {
-                ...block,
-                content: { ...block.content, assetId: assetIdMap.get(block.content.assetId)! },
-              }
-            : block
-        ),
-      })),
+      templates: notebook.templates.map((template) => {
+        const fresh: Notebook['templates'][number] = {
+          ...remapTemplate(template, assetIdMap),
+          libraryId:
+            template.libraryId && pageIdMap.has(template.libraryId)
+              ? pageIdMap.get(template.libraryId)
+              : template.libraryId,
+        };
+        return fresh;
+      }),
     };
 
     imported.push(writeNotebook(remapped));
   }
 
-  return { imported, skipped, assetCount };
+  return { imported, skipped, assetCount, pageCount };
+}
+
+/** Rewrites a template's image asset ids through an import's id map. */
+function remapTemplate(
+  template: Notebook['templates'][number],
+  assetIdMap: Map<string, string>,
+  libraryId?: string
+): Notebook['templates'][number] {
+  return {
+    ...template,
+    ...(libraryId !== undefined ? { libraryId } : {}),
+    blocks: template.blocks.map((block) =>
+      block.content.type === 'image' && assetIdMap.has(block.content.assetId)
+        ? {
+            ...block,
+            content: { ...block.content, assetId: assetIdMap.get(block.content.assetId)! },
+          }
+        : block
+    ),
+  };
 }
 
 /* ---------------------------------------------------------------- base64 */

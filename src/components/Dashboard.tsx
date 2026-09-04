@@ -124,18 +124,21 @@ export function Dashboard() {
       let imported = 0;
       let skipped = 0;
       let assets = 0;
+      let pages = 0;
       for (const file of Array.from(files)) {
         const result = await storage.importBundle(JSON.parse(await file.text()));
         imported += result.imported.length;
         skipped += result.skipped;
         assets += result.assetCount;
+        pages += result.pageCount;
       }
       refresh();
       setNote(
-        imported === 0
+        imported === 0 && pages === 0
           ? 'That file contained no readable notebooks.'
           : `Imported ${imported} notebook${imported === 1 ? '' : 's'}` +
-              (assets ? ` and ${assets} image${assets === 1 ? '' : 's'}` : '') +
+              (pages ? ` and ${pages} library page${pages === 1 ? '' : 's'}` : '') +
+              (assets ? ` with ${assets} image${assets === 1 ? '' : 's'}` : '') +
               (skipped ? ` — ${skipped} entry could not be read.` : '.')
       );
     } catch (err) {

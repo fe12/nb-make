@@ -86,14 +86,18 @@ export function SettingsPanel() {
     setError(null);
     try {
       let imported = 0;
+      let pages = 0;
       for (const file of Array.from(files)) {
         const result = await storage.importBundle(JSON.parse(await file.text()));
         imported += result.imported.length;
+        pages += result.pageCount;
       }
       setNote(
-        imported === 0
+        imported === 0 && pages === 0
           ? 'That file contained no readable notebooks.'
-          : `Imported ${imported} notebook${imported === 1 ? '' : 's'}.`
+          : `Imported ${imported} notebook${imported === 1 ? '' : 's'}` +
+              (pages ? ` and ${pages} library page${pages === 1 ? '' : 's'}` : '') +
+              '.'
       );
       // Imported notebooks are new to the server, so get them up there.
       if (status === 'signed-in') await syncNow();
