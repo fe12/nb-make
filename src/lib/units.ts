@@ -122,6 +122,41 @@ export function contentRect(size: Size, margins: Margins): Rect {
   };
 }
 
+/**
+ * Print bleed: how far artwork may run past the trim edge, per side, in
+ * millimetres. A per-side record rather than one number because a pattern is
+ * only extended on the sides where it actually reaches the page boundary —
+ * ruling inside margins never bleeds.
+ */
+export interface Bleed {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+export const ZERO_BLEED: Bleed = { top: 0, right: 0, bottom: 0, left: 0 };
+
+export const uniformBleed = (mm: number): Bleed => ({
+  top: mm,
+  right: mm,
+  bottom: mm,
+  left: mm,
+});
+
+export const hasBleed = (b: Bleed): boolean =>
+  b.top > 0 || b.right > 0 || b.bottom > 0 || b.left > 0;
+
+/** A rect grown outward by the given bleed. */
+export function expandRect(rect: Rect, bleed: Bleed): Rect {
+  return {
+    x: rect.x - bleed.left,
+    y: rect.y - bleed.top,
+    w: rect.w + bleed.left + bleed.right,
+    h: rect.h + bleed.top + bleed.bottom,
+  };
+}
+
 /** Largest uniform scale that fits `inner` inside `outer`. */
 export function fitScale(inner: Size, outer: Size): number {
   if (inner.w <= 0 || inner.h <= 0) return 1;

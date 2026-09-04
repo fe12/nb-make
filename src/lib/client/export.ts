@@ -10,6 +10,7 @@
 import { collectMathRequests, compileNotebook } from '../compile/notebook';
 import { exportNotebookPdf } from '../export/pdf';
 import { slugify } from '../defaults';
+import { uniformBleed } from '../units';
 import type { MathCache } from '../latex/types';
 import type { Notebook } from '../types/notebook';
 import { api } from './api';
@@ -38,7 +39,13 @@ export async function buildNotebookPdf({
   }
 
   const assets = await listAssets();
-  const compiled = compileNotebook(notebook, { assets, math: resolved });
+  // Flat output is for a printer doing its own scaling, so it stays at exact
+  // trim; imposed sheets are the ones that get cut and therefore bleed.
+  const compiled = compileNotebook(notebook, {
+    assets,
+    math: resolved,
+    bleed: mode === 'imposed' ? uniformBleed(notebook.imposition.bleed) : undefined,
+  });
 
   const bytes = await exportNotebookPdf({
     notebook,

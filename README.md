@@ -65,7 +65,11 @@ shown: the scripts parse it without a URL parser, so no escaping is needed.
    calendars, a month of habit trackers).
 3. **Print layout** — impose the pages onto sheets. Pick a grid, a saddle-stitch
    booklet, or cut-and-stack; or drag the slots around by hand and set each
-   one's orientation.
+   one's orientation. **Bleed** runs page-wide rulings and backgrounds past the
+   trim edge so an imprecise cut leaves no bald strip — only on sides the
+   artwork actually reaches, so a ruling inside margins never creeps outward.
+   Gutters and sheet margins grow to hold the overhang, and crop marks move
+   beyond it.
 4. **Export** — generate the PDF, in the browser.
 
 Pick a colour theme from the header — seven are included, two of them dark. The

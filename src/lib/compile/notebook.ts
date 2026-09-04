@@ -14,13 +14,19 @@ import type { Op } from '../render/ops';
 import { applyPalette } from '../render/palette';
 import type { Notebook } from '../types/notebook';
 import type { PageTemplate } from '../types/page';
-import { contentRect, resolvePageSize, type Size } from '../units';
+import { contentRect, hasBleed, resolvePageSize, type Bleed, type Size, ZERO_BLEED } from '../units';
 import { compileTemplate, formatPageNumber, type PageNumberContext } from './page';
 
 export interface CompiledPage {
   index: number;
   label: string;
   size: Size;
+  /**
+   * The bleed the page was compiled with. Export sizes its intermediate page
+   * box by this so the overhanging artwork survives embedding; zero bleed is
+   * the historical behaviour.
+   */
+  bleed: Bleed;
   ops: Op[];
   /**
    * Identical pages share a key. The exporter embeds one XObject per distinct
@@ -36,6 +42,12 @@ export interface CompileNotebookOptions {
   math: MathCache;
   /** Stop after this many pages, for fast previews. */
   limit?: number;
+  /**
+   * Print bleed, in millimetres past the trim edge. Only template-based pages
+   * honour it — parametric generators draw self-contained artwork and are left
+   * exactly as authored.
+   */
+  bleed?: Bleed;
 }
 
 export interface CompiledNotebook {
@@ -53,6 +65,12 @@ export function compileNotebook(
   const size = resolvePageSize(notebook.pageSize);
   const content = contentRect(size, notebook.margins);
   const templates = new Map(notebook.templates.map((t) => [t.id, t]));
+  const bleed = options.bleed ?? ZERO_BLEED;
+  // Folded into content keys so a bled and an un-bled compile of the same
+  // design never share embedded artwork.
+  const bleedKey = hasBleed(bleed)
+    ? `@b${bleed.top},${bleed.right},${bleed.bottom},${bleed.left}`
+    : '';
 
   const missingMath = new Set<string>();
   const warnings: string[] = [];
@@ -84,13 +102,14 @@ export function compileNotebook(
           assets: options.assets,
           math: options.math,
           palette: notebook.palette,
+          bleed,
         });
         compiled.missingMath.forEach((k) => missingMath.add(k));
         compiled.warnings.forEach((w) => warnings.push(w));
         baseOps = compiled.ops;
         templateCache.set(source.template.id, baseOps);
       }
-      baseKey = `t:${source.template.id}`;
+      baseKey = `t:${source.template.id}${bleedKey}`;
     } else {
       // Generated pages emit theme references too. Resolving once per distinct
       // ops array keeps repeated pages sharing one array, which is what the
@@ -122,6 +141,7 @@ export function compileNotebook(
       index: i,
       label: source.label,
       size,
+      bleed,
       // Concatenating only when there is an overlay preserves the shared
       // reference in the common case.
       ops: overlay.length ? [...baseOps, ...overlay] : baseOps,

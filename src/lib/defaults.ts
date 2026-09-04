@@ -58,6 +58,7 @@ export function createNotebook(input: NewNotebookInput): Notebook {
       cols: 1,
       gutterX: 0,
       gutterY: 0,
+      bleed: 0,
       slotRotation: 0,
       scaleToFit: true,
       extraScale: 1,

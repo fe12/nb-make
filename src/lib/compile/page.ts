@@ -20,7 +20,7 @@ import { renderPattern } from '../render/patterns';
 import type { Block, BlockContent, PageTemplate } from '../types/page';
 import type { Pattern } from '../types/pattern';
 import type { NotebookPalette } from '../palette';
-import { contentRect, resolvePageSize, type Margins, type Rect, type Size } from '../units';
+import { contentRect, resolvePageSize, type Bleed, type Margins, type Rect, type Size } from '../units';
 
 export interface PageNumberContext {
   /** The number to print, already offset by `startAt`. */
@@ -39,6 +39,12 @@ export interface CompilePageOptions {
   pageNumber?: PageNumberContext;
   /** Resolves `theme:*` colours. Omit to leave references unresolved. */
   palette?: NotebookPalette;
+  /**
+   * Print bleed: how far page-wide artwork may run past the trim edge. Only
+   * the background and a ruling that reaches the page boundary are extended —
+   * never blocks, and never a ruling that stops inside the margins.
+   */
+  bleed?: Bleed;
 }
 
 export interface CompiledContent {
@@ -70,20 +76,30 @@ export function compileTemplate(
   const missingMath = new Set<string>();
   const warnings: string[] = [];
 
+  // Bleed is only granted to artwork that actually reaches an edge: the page
+  // background on every side, and the ruling only on the sides where its area
+  // touches the page boundary. A ruling inside margins must not creep into
+  // them, and blocks never bleed — extending an image or a table is a design
+  // decision, not trim safety.
+  const bleed = options.bleed ?? { top: 0, right: 0, bottom: 0, left: 0 };
+
   if (template.background) {
     ops.push({
       kind: 'rect',
-      x: 0,
-      y: 0,
-      w: size.w,
-      h: size.h,
+      x: -bleed.left,
+      y: -bleed.top,
+      w: size.w + bleed.left + bleed.right,
+      h: size.h + bleed.top + bleed.bottom,
       fill: { color: template.background },
     });
   }
 
   const patternArea: Rect =
     template.pattern.area === 'full' ? { x: 0, y: 0, w: size.w, h: size.h } : content;
-  ops.push(...renderPattern(template.pattern, patternArea, { scale: pageScale }));
+  const patternBleed: Bleed = touchesEdges(patternArea, size, bleed);
+  ops.push(
+    ...renderPattern(template.pattern, patternArea, { scale: pageScale, bleed: patternBleed })
+  );
 
   const ctx: BlockContext = {
     content,
@@ -107,6 +123,17 @@ export function compileTemplate(
     ops: options.palette ? applyPalette(ops, options.palette) : ops,
     missingMath: [...missingMath],
     warnings,
+  };
+}
+
+/** The subset of `bleed` on sides where `area` reaches the page boundary. */
+function touchesEdges(area: Rect, page: Size, bleed: Bleed): Bleed {
+  const e = 0.05; // mm; margin rounding leaves areas a hair off the edge
+  return {
+    top: area.y <= e ? bleed.top : 0,
+    right: area.x + area.w >= page.w - e ? bleed.right : 0,
+    bottom: area.y + area.h >= page.h - e ? bleed.bottom : 0,
+    left: area.x <= e ? bleed.left : 0,
   };
 }
 

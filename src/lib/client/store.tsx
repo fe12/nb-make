@@ -14,6 +14,7 @@ import { setAssetUrlResolver, type AssetIndex } from '../assets';
 import { collectMathRequests, compileNotebook, type CompiledNotebook } from '../compile/notebook';
 import type { MathCache } from '../latex/types';
 import type { Notebook } from '../types/notebook';
+import { uniformBleed } from '../units';
 import { api } from './api';
 import { PaletteProvider } from './palette-context';
 import * as storage from './storage';
@@ -326,7 +327,16 @@ export function NotebookProvider({
 export function useCompiled(limit?: number): CompiledNotebook {
   const { notebook, assets, math } = useNotebook();
   return useMemo(
-    () => compileNotebook(notebook, { assets, math, limit }),
+    () =>
+      compileNotebook(notebook, {
+        assets,
+        math,
+        limit,
+        // The print preview must show the bleed the exporter will draw. Other
+        // consumers (page lists) render inside a page-sized SVG, which clips
+        // the overhang on its own.
+        bleed: uniformBleed(notebook.imposition.bleed),
+      }),
     [notebook, assets, math, limit]
   );
 }

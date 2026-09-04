@@ -4,12 +4,12 @@ import clsx from 'clsx';
 import { useRef, useState } from 'react';
 import { PagePreview } from '@/components/PagePreview';
 import type { CompiledPage } from '@/lib/compile/notebook';
-import { placeInSlot, type Sheet } from '@/lib/imposition';
+import { placeInSlot, applyBleed, type Sheet } from '@/lib/imposition';
 import { cropMarks, foldMarks, pageBorder } from '@/lib/imposition/marks';
 import { renderOps } from '@/lib/render/svg';
 import type { Op } from '@/lib/render/ops';
 import type { Imposition, Slot } from '@/lib/types/notebook';
-import { contentRect, resolvePageSize, type Size } from '@/lib/units';
+import { contentRect, hasBleed, resolvePageSize, ZERO_BLEED, type Size } from '@/lib/units';
 
 type Handle = 'move' | 'se' | 'e' | 's';
 
@@ -62,16 +62,19 @@ export function SheetCanvas({
 
   const sheetSize = resolvePageSize(imposition.sheet);
   const printable = contentRect(sheetSize, imposition.sheetMargins);
+  // The same growth the exporter applies, so the preview is the printed sheet.
+  const effective = applyBleed(imposition, imposition.bleed);
+  const bleedMm = imposition.bleed;
 
   const pct = (value: number, axis: 'w' | 'h') => (value / sheetSize[axis]) * 100;
 
   // Marks are produced by the same code the exporter uses, so what is shown
   // here is literally what gets printed.
-  const markOps: Op[] = [...foldMarks(sheetSize, imposition)];
+  const markOps: Op[] = [...foldMarks(sheetSize, effective)];
   for (const placement of sheet?.placements ?? []) {
-    const geometry = placeInSlot(placement.slot, pageSize, imposition);
-    markOps.push(...pageBorder(geometry.rect, imposition));
-    markOps.push(...cropMarks(geometry.rect, imposition));
+    const geometry = placeInSlot(placement.slot, pageSize, effective);
+    markOps.push(...pageBorder(geometry.rect, effective));
+    markOps.push(...cropMarks(geometry.rect, imposition, bleedMm));
   }
 
   const onPointerDown = (event: React.PointerEvent, slot: Slot, handle: Handle) => {
@@ -151,15 +154,20 @@ export function SheetCanvas({
 
       {sheet?.placements.map((placement) => {
         const slot = placement.slot;
-        const geometry = placeInSlot(slot, pageSize, imposition);
+        const geometry = placeInSlot(slot, pageSize, effective);
         const page = placement.pageIndex === null ? null : pages[placement.pageIndex];
         const selected = slot.id === selectedSlotId;
         const rotated = slot.rotation === 90 || slot.rotation === 270;
 
         // The drawn page keeps its own aspect; the covered area is its bounding
         // box, so a rotated page is sized transposed and then rotated in CSS.
-        const drawnW = rotated ? geometry.rect.h : geometry.rect.w;
-        const drawnH = rotated ? geometry.rect.w : geometry.rect.h;
+        // With bleed the preview box grows by the overhang on every side —
+        // uniform bleed grows both visual axes equally, rotation or not.
+        const bleedPad = hasBleed(page?.bleed ?? ZERO_BLEED)
+          ? 2 * bleedMm * geometry.scale
+          : 0;
+        const drawnW = (rotated ? geometry.rect.h : geometry.rect.w) + bleedPad;
+        const drawnH = (rotated ? geometry.rect.w : geometry.rect.h) + bleedPad;
 
         return (
           <div key={slot.id}>
@@ -178,6 +186,16 @@ export function SheetCanvas({
                 <PagePreview
                   ops={page.ops}
                   size={pageSize}
+                  viewBox={
+                    hasBleed(page.bleed)
+                      ? {
+                          x: -page.bleed.left,
+                          y: -page.bleed.top,
+                          w: pageSize.w + page.bleed.left + page.bleed.right,
+                          h: pageSize.h + page.bleed.top + page.bleed.bottom,
+                        }
+                      : undefined
+                  }
                   showShadow={false}
                   className="h-full ring-[0.5px] ring-ink-200"
                 />

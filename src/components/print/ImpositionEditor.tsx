@@ -17,7 +17,7 @@ import {
   Toggle,
 } from '@/components/ui/controls';
 import { useCompiled, useNotebook } from '@/lib/client/store';
-import { generateSlots, placeInSlot, planSheets, summarise } from '@/lib/imposition';
+import { applyBleed, generateSlots, placeInSlot, planSheets, summarise } from '@/lib/imposition';
 import type { Imposition, Slot } from '@/lib/types/notebook';
 import { resolvePageSize, type Margins } from '@/lib/units';
 
@@ -37,11 +37,17 @@ export function ImpositionEditor() {
     update((draft) => ({ ...draft, imposition: recipe(draft.imposition) }), options);
 
   // Layout modes generate slots; `manual` keeps whatever the user arranged.
-  const slots = useMemo(() => generateSlots(imposition), [imposition]);
+  // Bleed grows gutters and margins first (see applyBleed) so the arrangement
+  // previewed is the one printed; switching to manual stores that grown layout.
+  const effective = useMemo(
+    () => applyBleed(imposition, imposition.bleed),
+    [imposition]
+  );
+  const slots = useMemo(() => generateSlots(effective), [effective]);
 
   const sheets = useMemo(
-    () => planSheets(compiled.totalPages, imposition),
-    [compiled.totalPages, imposition]
+    () => planSheets(compiled.totalPages, effective),
+    [compiled.totalPages, effective]
   );
   const summary = useMemo(
     () => summarise(compiled.totalPages, imposition, pageSize),
@@ -60,8 +66,8 @@ export function ImpositionEditor() {
       (current) => ({
         ...current,
         mode: 'manual',
-        slots: (current.mode === 'manual' ? current.slots : generateSlots(current)).map((slot) =>
-          slot.id === id ? { ...slot, ...slotPatch } : slot
+        slots: (current.mode === 'manual' ? current.slots : generateSlots(applyBleed(current, current.bleed))).map(
+          (slot) => (slot.id === id ? { ...slot, ...slotPatch } : slot)
         ),
       }),
       options
@@ -209,8 +215,8 @@ export function ImpositionEditor() {
               </div>
             </div>
             <p className="mt-2 text-[10.5px] text-ink-400">
-              Page fills {round(placeInSlot(selectedSlot, pageSize, imposition).rect.w)} ×{' '}
-              {round(placeInSlot(selectedSlot, pageSize, imposition).rect.h)} mm of this slot.
+              Page fills {round(placeInSlot(selectedSlot, pageSize, effective).rect.w)} ×{' '}
+              {round(placeInSlot(selectedSlot, pageSize, effective).rect.h)} mm of this slot.
             </p>
           </Panel>
         )}
@@ -344,6 +350,20 @@ export function ImpositionEditor() {
                 />
               </Field>
             </div>
+
+            <Field
+              label="Bleed"
+              hint="Runs page-wide rulings and backgrounds past the trim edge, so an imprecise cut leaves no bald strip. Gutters and sheet margins grow to hold it."
+            >
+              <NumberInput
+                value={imposition.bleed}
+                min={0}
+                max={20}
+                step={0.5}
+                suffix="mm"
+                onChange={(bleed) => patch((current) => ({ ...current, bleed }))}
+              />
+            </Field>
 
             <Field label="Rotate every slot">
               <Segmented

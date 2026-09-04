@@ -24,12 +24,19 @@ import {
 } from 'pdf-lib';
 import type { AssetIndex } from '../assets';
 import type { CompiledPage } from '../compile/notebook';
-import { placeInSlot, planSheets } from '../imposition';
+import { applyBleed, placeInSlot, planSheets } from '../imposition';
 import { cropMarks, foldMarks, pageBorder, slotNumber } from '../imposition/marks';
-import { collectAssetIds, type Op } from '../render/ops';
+import { collectAssetIds, group, translate, type Op } from '../render/ops';
 import { drawOps, FontPool } from '../render/pdf';
 import type { Notebook } from '../types/notebook';
-import { mmToPt, resolvePageSize, type Rect, type Size } from '../units';
+import {
+  hasBleed,
+  mmToPt,
+  resolvePageSize,
+  type Bleed,
+  type Rect,
+  type Size,
+} from '../units';
 
 export interface ExportOptions {
   notebook: Notebook;
@@ -54,14 +61,25 @@ export async function exportNotebookPdf(options: ExportOptions): Promise<Uint8Ar
   const fontPool = new FontPool(inner);
 
   // Pass 1 — one intermediate page per distinct content key.
+  //
+  // A page's box is its trim size grown by its bleed, with the artwork
+  // translated into place. Embedding copies this box into a Form XObject whose
+  // BBox is the whole thing, which is what lets the overhang survive into the
+  // sheets: a trim-sized box would clip the bleed away at this exact line.
   const keyToIndex = new Map<string, number>();
   for (const page of pages) {
     if (keyToIndex.has(page.contentKey)) continue;
     keyToIndex.set(page.contentKey, keyToIndex.size);
 
-    const pdfPage = addEmbeddablePage(inner, page.size);
+    const box = bleedBox(page.size, page.bleed);
+    const pdfPage = addEmbeddablePage(inner, box.size);
     const fonts = await fontPool.preload(page.ops);
-    drawOps({ page: pdfPage, heightMm: page.size.h, fonts, images }, page.ops);
+    // The wrapping group is a pure translation — flatten resolves it into the
+    // leaf ops, so stroke batching and everything downstream is unaffected.
+    const placed = hasBleed(page.bleed)
+      ? [group(page.ops, translate(page.bleed.left, page.bleed.top))]
+      : page.ops;
+    drawOps({ page: pdfPage, heightMm: box.size.h, fonts, images }, placed);
   }
 
   if (keyToIndex.size === 0) {
@@ -91,11 +109,15 @@ export async function exportNotebookPdf(options: ExportOptions): Promise<Uint8Ar
       const target = out.addPage([mmToPt(page.size.w), mmToPt(page.size.h)]);
       const art = byKey.get(page.contentKey);
       if (art) {
+        // Pages compiled with bleed draw here offset so the trim box lands on
+        // the page; the overhang falls outside the MediaBox and viewers clip
+        // it. Flat output is meant for a printer doing its own scaling, so the
+        // sheet stays at exact trim.
         target.drawPage(art, {
-          x: 0,
-          y: 0,
-          width: mmToPt(page.size.w),
-          height: mmToPt(page.size.h),
+          x: -mmToPt(page.bleed.left),
+          y: -mmToPt(page.bleed.bottom),
+          width: mmToPt(page.size.w + page.bleed.left + page.bleed.right),
+          height: mmToPt(page.size.h + page.bleed.top + page.bleed.bottom),
         });
       }
     }
@@ -118,21 +140,26 @@ async function drawImposedSheets(
 ): Promise<void> {
   const { notebook, pages } = options;
   const imposition = notebook.imposition;
-  const sheetSize = resolvePageSize(imposition.sheet);
-  const sheets = planSheets(pages.length, imposition);
+  const bleedMm = imposition.bleed;
+  // Gutters and sheet margins grow to hold the overhang (see applyBleed);
+  // everything downstream — slot generation, placement, marks — uses the
+  // grown geometry so the sheet is exactly what the preview showed.
+  const effective = applyBleed(imposition, bleedMm);
+  const sheetSize = resolvePageSize(effective.sheet);
+  const sheets = planSheets(pages.length, effective);
   const fontPool = new FontPool(out);
 
   for (const sheet of sheets) {
     const target = out.addPage([mmToPt(sheetSize.w), mmToPt(sheetSize.h)]);
-    const marks: Op[] = [...foldMarks(sheetSize, imposition)];
+    const marks: Op[] = [...foldMarks(sheetSize, effective)];
 
     for (const placement of sheet.placements) {
-      const geometry = placeInSlot(placement.slot, trimSize, imposition);
-      marks.push(...pageBorder(geometry.rect, imposition));
-      marks.push(...cropMarks(geometry.rect, imposition));
+      const geometry = placeInSlot(placement.slot, trimSize, effective);
+      marks.push(...pageBorder(geometry.rect, effective));
+      marks.push(...cropMarks(geometry.rect, imposition, bleedMm));
 
       if (placement.pageIndex === null) {
-        marks.push(...slotNumber(geometry.rect, '—', imposition));
+        marks.push(...slotNumber(geometry.rect, '—', effective));
         continue;
       }
 
@@ -140,8 +167,8 @@ async function drawImposedSheets(
       const art = page && byKey.get(page.contentKey);
       if (!art) continue;
 
-      marks.push(...slotNumber(geometry.rect, String(placement.pageIndex + 1), imposition));
-      drawPlacedPage(target, art, geometry.rect, geometry.rotation, sheetSize);
+      marks.push(...slotNumber(geometry.rect, String(placement.pageIndex + 1), effective));
+      drawPlacedPage(target, art, geometry.rect, geometry.rotation, sheetSize, page.bleed);
     }
 
     if (marks.length > 0) {
@@ -152,20 +179,23 @@ async function drawImposedSheets(
 }
 
 /**
- * Places an embedded page so that it exactly covers `rect` (given in
- * millimetres, top-left origin) after rotating it clockwise by `rotation`.
+ * Places an embedded page so that its *trim box* exactly covers `rect` (given
+ * in millimetres, top-left origin) after rotating it clockwise by `rotation`,
+ * with any bleed hanging outside the rect.
  *
- * pdf-lib emits `translate(x,y) · rotate(θ) · scale(...)`, and rotates
- * anticlockwise in PDF's Y-up space. Each quarter turn therefore needs a
- * different anchor corner — hence the explicit four-case table rather than a
- * general formula that would be harder to verify.
+ * The embedded form covers trim + bleed on every side, so the draw anchor is
+ * derived from the trim box's centre inside the form: with the form drawn at
+ * scale, the anchor must sit at the target centre minus the rotated, scaled
+ * offset of the form-space trim centre. One formula covers all four quarter
+ * turns and collapses to the plain corner anchor when there is no bleed.
  */
 function drawPlacedPage(
   target: PDFPage,
   art: PDFEmbeddedPage,
   rect: Rect,
   rotation: number,
-  sheetSize: Size
+  sheetSize: Size,
+  bleed: Bleed
 ): void {
   // Convert the covered area to PDF coordinates (Y up from the sheet bottom).
   const X = mmToPt(rect.x);
@@ -175,39 +205,50 @@ function drawPlacedPage(
 
   // pdf-lib's rotation is anticlockwise; ours is clockwise on the printed page.
   const theta = (360 - (rotation % 360)) % 360;
+  const rad = (theta * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
 
-  let x: number;
-  let y: number;
-  let width: number;
-  let height: number;
+  // The form is trim + bleed; the drawn box swaps extents on quarter turns.
+  const quarter = theta === 90 || theta === 270;
 
-  switch (theta) {
-    case 90:
-      x = X + W;
-      y = Y;
-      width = H;
-      height = W;
-      break;
-    case 180:
-      x = X + W;
-      y = Y + H;
-      width = W;
-      height = H;
-      break;
-    case 270:
-      x = X;
-      y = Y + H;
-      width = H;
-      height = W;
-      break;
-    default:
-      x = X;
-      y = Y;
-      width = W;
-      height = H;
-  }
+  // Trim box size in form space (also PDF points).
+  const fw = art.width;
+  const fh = art.height;
+  const trimW = fw - mmToPt(bleed.left) - mmToPt(bleed.right);
+  const trimH = fh - mmToPt(bleed.bottom) - mmToPt(bleed.top);
 
-  target.drawPage(art, { x, y, width, height, rotate: degrees(theta) });
+  // The trim box maps onto the (rotated) rect, so the scale is decided by the
+  // trim box — NOT by the form: the form is drawn at this scale times its own
+  // full size, which is what lets the bleed hang outside the rect. Drawing the
+  // form at W×H would squeeze trim + bleed into the trim box.
+  const s = quarter ? W / trimH : W / trimW;
+  const width = fw * s;
+  const height = fh * s;
+
+  // Trim box centre in form space — left bleed plus half the trim width, i.e.
+  // the centre's distance from the form's origin. Scaled and rotated, this is
+  // the anchor offset from the drawn form's origin.
+  const cx = mmToPt(bleed.left) + trimW / 2;
+  const cy = mmToPt(bleed.bottom) + trimH / 2;
+
+  target.drawPage(art, {
+    x: X + W / 2 - (cx * s * cos - cy * s * sin),
+    y: Y + H / 2 - (cx * s * sin + cy * s * cos),
+    width,
+    height,
+    rotate: degrees(theta),
+  });
+}
+
+/** A page's media box with its bleed included, plus the offset the art sits at. */
+function bleedBox(size: Size, bleed: Bleed): { size: Size } {
+  return {
+    size: {
+      w: size.w + bleed.left + bleed.right,
+      h: size.h + bleed.top + bleed.bottom,
+    },
+  };
 }
 
 /**

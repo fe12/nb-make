@@ -83,6 +83,12 @@ export const zImposition = z.object({
   cols: z.number().int().min(1).max(12).default(2),
   gutterX: z.number().min(0).max(100).default(0),
   gutterY: z.number().min(0).max(100).default(0),
+  /**
+   * Print bleed in millimetres: how far page-wide artwork (a full-page ruling,
+   * the background) runs past the trim edge, so an imprecise cut never leaves a
+   * bald strip. Imposition grows gutters and sheet margins to make room.
+   */
+  bleed: z.number().min(0).max(20).default(0),
   /** Rotate every slot, e.g. two A5 landscape pages on a portrait A4. */
   slotRotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).default(0),
   /** Shrink pages to fit their slot when the trim size is larger. */

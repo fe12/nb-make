@@ -13,6 +13,7 @@ import type { Size } from '@/lib/units';
 export const PagePreview = memo(function PagePreview({
   ops,
   size,
+  viewBox,
   className,
   background = '#ffffff',
   overlay,
@@ -22,6 +23,11 @@ export const PagePreview = memo(function PagePreview({
 }: {
   ops: Op[];
   size: Size;
+  /**
+   * Overrides the visible millimetre box, e.g. `-3 -3 153 213` to show a
+   * page's bleed overhang around its trim. `size` still sets the aspect.
+   */
+  viewBox?: { x: number; y: number; w: number; h: number };
   className?: string;
   background?: string;
   /** Editor chrome (selection handles, guides) drawn in the same mm space. */
@@ -30,16 +36,17 @@ export const PagePreview = memo(function PagePreview({
   onClick?: () => void;
   title?: string;
 }) {
+  const box = viewBox ?? { x: 0, y: 0, w: size.w, h: size.h };
   return (
     <svg
-      viewBox={`0 0 ${size.w} ${size.h}`}
+      viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
       className={clsx(
         'block h-auto w-full',
         showShadow && 'shadow-[0_1px_3px_rgba(23,31,40,0.16)]',
         onClick && 'cursor-pointer',
         className
       )}
-      style={{ aspectRatio: `${size.w} / ${size.h}`, background }}
+      style={{ aspectRatio: `${box.w} / ${box.h}`, background }}
       onClick={onClick}
       role={onClick ? 'button' : 'img'}
       aria-label={title}

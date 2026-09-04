@@ -33,6 +33,33 @@ export interface Placement {
 
 export const idFor = (prefix: string, n: number): string => `${prefix}-${n}`;
 
+/**
+ * Grows gutters and sheet margins so bleed overhang has somewhere to land.
+ *
+ * A gutter must hold the bleed of the pages on *both* of its sides (2×bleed),
+ * and the sheet margin must at least cover the bleed pointing off the sheet.
+ * Without this, one page's ruling would print into its neighbour's trim area
+ * and survive the cut — worse than having no bleed at all.
+ *
+ * Manual mode keeps the user's arrangement untouched: they sized the slots, so
+ * making room for bleed is on them (summarise says so).
+ */
+export function applyBleed(imposition: Imposition, bleedMm: number): Imposition {
+  if (bleedMm <= 0 || imposition.mode === 'manual') return imposition;
+
+  return {
+    ...imposition,
+    gutterX: Math.max(imposition.gutterX, 2 * bleedMm),
+    gutterY: Math.max(imposition.gutterY, 2 * bleedMm),
+    sheetMargins: {
+      top: Math.max(imposition.sheetMargins.top, bleedMm),
+      right: Math.max(imposition.sheetMargins.right, bleedMm),
+      bottom: Math.max(imposition.sheetMargins.bottom, bleedMm),
+      left: Math.max(imposition.sheetMargins.left, bleedMm),
+    },
+  };
+}
+
 /* ----------------------------------------------------------- slot layout */
 
 /**
@@ -285,11 +312,20 @@ export function summarise(
   imposition: Imposition,
   pageSize: Size
 ): ImpositionSummary {
-  const slots = orderedSlots(generateSlots(imposition));
-  const sheets = planSheets(pageCount, imposition);
+  const effective = applyBleed(imposition, imposition.bleed);
+  const slots = orderedSlots(generateSlots(effective));
+  const sheets = planSheets(pageCount, effective);
   const sheetSize = resolvePageSize(imposition.sheet);
-  const scale = slots.length ? placeInSlot(slots[0], pageSize, imposition).scale : 1;
+  const scale = slots.length ? placeInSlot(slots[0], pageSize, effective).scale : 1;
   const notes: string[] = [];
+
+  if (imposition.bleed > 0) {
+    notes.push(
+      imposition.mode === 'manual'
+        ? `Bleed ${imposition.bleed} mm is drawn past every trim edge, but manual slots are not resized to make room — check neighbouring pages do not overlap each other's bleed.`
+        : `Bleed ${imposition.bleed} mm: rulings and page backgrounds run past the trim edge, and gutters and sheet margins have grown to at least ${2 * imposition.bleed} mm and ${imposition.bleed} mm to hold the overhang.`
+    );
+  }
 
   if (imposition.mode === 'booklet') {
     notes.push(

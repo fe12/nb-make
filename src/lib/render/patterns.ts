@@ -1,12 +1,18 @@
 /**
  * Turns a `Pattern` into drawing ops confined to a rectangle.
  *
- * Every generator emits geometry that is already inside `area`, so nothing here
- * relies on clipping. That matters because clipping is the one primitive the
- * PDF backend has to hand-roll, and rulings are by far the most op-heavy thing
- * we draw.
+ * Every generator emits geometry that is already inside its bounds, so nothing
+ * here relies on clipping. That matters because clipping is the one primitive
+ * the PDF backend has to hand-roll, and rulings are by far the most op-heavy
+ * thing we draw.
+ *
+ * Generators take two rects: `area` anchors the lattice (tick positions never
+ * move when bleed is added) and `extent` bounds the emission — with bleed it
+ * is `area` grown outward, and the ruling continues past the trim edge without
+ * shifting the interior. Radial and cell-block patterns (polar, genkōyōshi)
+ * are centred designs and deliberately do not bleed.
  */
-import type { Rect } from '../units';
+import { expandRect, ZERO_BLEED, type Bleed, type Rect } from '../units';
 import type { Pattern, PatternSpec } from '../types/pattern';
 import {
   firstTick,
@@ -23,6 +29,12 @@ import type { Op, Stroke } from './ops';
 export interface PatternContext {
   /** Multiplier applied to millimetre spacings when `scaleWithPage` is set. */
   scale: number;
+  /**
+   * How far the ruling may run past `area` on sides where it touches the page
+   * boundary. Sides that do not reach the boundary must carry 0 — the caller
+   * (compile) decides that, not the generators.
+   */
+  bleed?: Bleed;
 }
 
 export function renderPattern(
@@ -33,7 +45,13 @@ export function renderPattern(
   if (!isDrawable(area) || pattern.spec.type === 'blank') return [];
 
   const s = pattern.scaleWithPage ? ctx.scale : 1;
-  const ops = build(pattern, area, s);
+  // `area` anchors the lattice; `extent` is how far the geometry may run. With
+  // no bleed they are the same rect and every generator behaves exactly as it
+  // always did. With bleed, ticks keep their positions relative to `area` and
+  // the ruling simply continues past the trim edge — the interior never shifts,
+  // which is the whole point of bleed.
+  const extent = expandRect(area, ctx.bleed ?? ZERO_BLEED);
+  const ops = build(pattern, area, extent, s);
   if (ops.length === 0) return ops;
 
   return pattern.opacity < 1
@@ -41,7 +59,7 @@ export function renderPattern(
     : ops;
 }
 
-function build(pattern: Pattern, area: Rect, s: number): Op[] {
+function build(pattern: Pattern, area: Rect, extent: Rect, s: number): Op[] {
   const { align, offsetX, offsetY } = pattern;
   const spec = pattern.spec;
 
@@ -49,35 +67,35 @@ function build(pattern: Pattern, area: Rect, s: number): Op[] {
     case 'blank':
       return [];
     case 'ruled':
-      return ruled(spec, area, s, align, offsetX, offsetY);
+      return ruled(spec, area, extent, s, align, offsetX, offsetY);
     case 'dots':
-      return dots(spec, area, s, align, offsetX, offsetY);
+      return dots(spec, area, extent, s, align, offsetX, offsetY);
     case 'grid':
-      return grid(spec, area, s, align, offsetX, offsetY);
+      return grid(spec, area, extent, s, align, offsetX, offsetY);
     case 'graph':
-      return graph(spec, area, s, align, offsetX, offsetY);
+      return graph(spec, area, extent, s, align, offsetX, offsetY);
     case 'isometric':
-      return isometric(spec, area, s, offsetX);
+      return isometric(spec, area, extent, s, offsetX);
     case 'hexagon':
-      return hexagon(spec, area, s);
+      return hexagon(spec, area, extent, s);
     case 'triangle':
-      return triangle(spec, area, s, offsetX, offsetY);
+      return triangle(spec, area, extent, s, offsetX, offsetY);
     case 'polar':
       return polar(spec, area, s);
     case 'logscale':
-      return logscale(spec, area, s);
+      return logscale(spec, area, extent, s);
     case 'music':
-      return music(spec, area, s, offsetY);
+      return music(spec, area, extent, s, offsetY);
     case 'tablature':
-      return tablature(spec, area, s, offsetY);
+      return tablature(spec, area, extent, s, offsetY);
     case 'handwriting':
-      return handwriting(spec, area, s, offsetY);
+      return handwriting(spec, area, extent, s, offsetY);
     case 'seyes':
-      return seyes(spec, area, s);
+      return seyes(spec, area, extent, s);
     case 'genkoyoshi':
       return genkoyoshi(spec, area);
     case 'dottedthirds':
-      return dottedThirds(spec, area, s, offsetY);
+      return dottedThirds(spec, area, extent, s, offsetY);
   }
 }
 
@@ -88,6 +106,7 @@ type Of<T extends PatternSpec['type']> = Extract<PatternSpec, { type: T }>;
 function ruled(
   p: Of<'ruled'>,
   area: Rect,
+  extent: Rect,
   s: number,
   align: 'start' | 'center',
   ox: number,
@@ -98,14 +117,14 @@ function ruled(
   const ops: Op[] = [];
 
   const start = firstTick(area.y, area.h, spacing, align, oy + p.topOffset * s);
-  for (const y of ticks(start, spacing, area.y, area.y + area.h)) {
-    ops.push(hLine(area, y, line));
+  for (const y of ticks(start, spacing, extent.y, extent.y + extent.h)) {
+    ops.push(hLine(extent, y, line));
   }
 
   if (p.headerRule.enabled) {
     const y = area.y + p.headerRule.offset * s;
     if (y >= area.y && y <= area.y + area.h) {
-      ops.push(hLine(area, y, stroke(p.headerRule.color, p.headerRule.width * s)));
+      ops.push(hLine(extent, y, stroke(p.headerRule.color, p.headerRule.width * s)));
     }
   }
 
@@ -113,10 +132,10 @@ function ruled(
     const rule = stroke(p.marginRule.color, p.marginRule.width * s);
     const off = p.marginRule.offset * s + ox;
     if (p.marginRule.side === 'left' || p.marginRule.side === 'both') {
-      ops.push(vLine(area, area.x + off, rule));
+      ops.push(vLine(extent, area.x + off, rule));
     }
     if (p.marginRule.side === 'right' || p.marginRule.side === 'both') {
-      ops.push(vLine(area, area.x + area.w - off, rule));
+      ops.push(vLine(extent, area.x + area.w - off, rule));
     }
   }
   return ops;
@@ -127,6 +146,7 @@ function ruled(
 function dots(
   p: Of<'dots'>,
   area: Rect,
+  extent: Rect,
   s: number,
   align: 'start' | 'center',
   ox: number,
@@ -135,8 +155,8 @@ function dots(
   const sx = p.spacingX * s;
   const sy = p.spacingY * s;
   const r = (p.size * s) / 2;
-  const xs = ticks(firstTick(area.x, area.w, sx, align, ox), sx, area.x, area.x + area.w);
-  const ys = ticks(firstTick(area.y, area.h, sy, align, oy), sy, area.y, area.y + area.h);
+  const xs = ticks(firstTick(area.x, area.w, sx, align, ox), sx, extent.x, extent.x + extent.w);
+  const ys = ticks(firstTick(area.y, area.h, sy, align, oy), sy, extent.y, extent.y + extent.h);
   if (xs.length * ys.length > 60000) return [];
 
   const ops: Op[] = [];
@@ -171,6 +191,7 @@ function dots(
 function grid(
   p: Of<'grid'>,
   area: Rect,
+  extent: Rect,
   s: number,
   align: 'start' | 'center',
   ox: number,
@@ -180,11 +201,11 @@ function grid(
   const sy = p.spacingY * s;
   const line = stroke(p.color, p.width * s);
   const ops: Op[] = [];
-  for (const x of ticks(firstTick(area.x, area.w, sx, align, ox), sx, area.x, area.x + area.w)) {
-    ops.push(vLine(area, x, line));
+  for (const x of ticks(firstTick(area.x, area.w, sx, align, ox), sx, extent.x, extent.x + extent.w)) {
+    ops.push(vLine(extent, x, line));
   }
-  for (const y of ticks(firstTick(area.y, area.h, sy, align, oy), sy, area.y, area.y + area.h)) {
-    ops.push(hLine(area, y, line));
+  for (const y of ticks(firstTick(area.y, area.h, sy, align, oy), sy, extent.y, extent.y + extent.h)) {
+    ops.push(hLine(extent, y, line));
   }
   return ops;
 }
@@ -194,6 +215,7 @@ function grid(
 function graph(
   p: Of<'graph'>,
   area: Rect,
+  extent: Rect,
   s: number,
   align: 'start' | 'center',
   ox: number,
@@ -212,30 +234,30 @@ function graph(
     return n % p.majorEvery === 0;
   };
 
-  for (const x of ticks(x0, step, area.x, area.x + area.w)) {
-    ops.push(vLine(area, x, classify(x, x0) ? majorLine : minorLine));
+  for (const x of ticks(x0, step, extent.x, extent.x + extent.w)) {
+    ops.push(vLine(extent, x, classify(x, x0) ? majorLine : minorLine));
   }
-  for (const y of ticks(y0, step, area.y, area.y + area.h)) {
-    ops.push(hLine(area, y, classify(y, y0) ? majorLine : minorLine));
+  for (const y of ticks(y0, step, extent.y, extent.y + extent.h)) {
+    ops.push(hLine(extent, y, classify(y, y0) ? majorLine : minorLine));
   }
   return ops;
 }
 
 /* -------------------------------------------------------------- isometric */
 
-function isometric(p: Of<'isometric'>, area: Rect, s: number, ox: number): Op[] {
+function isometric(p: Of<'isometric'>, area: Rect, extent: Rect, s: number, ox: number): Op[] {
   const spacing = p.spacing * s;
   const line = stroke(p.color, p.width * s);
   const ops: Op[] = [];
 
   // The two 30° families define the triangles; verticals are optional.
-  ops.push(...parallelLines(area, 30, spacing, line));
-  ops.push(...parallelLines(area, -30, spacing, line));
+  ops.push(...parallelLines(extent, 30, spacing, line));
+  ops.push(...parallelLines(extent, -30, spacing, line));
   if (p.showVerticals) {
     // Vertical spacing that lines up with the lattice the 30° families create.
     const vSpacing = spacing / Math.cos((30 * Math.PI) / 180);
-    for (const x of ticks(area.x + ox, vSpacing, area.x, area.x + area.w)) {
-      ops.push(vLine(area, x, line));
+    for (const x of ticks(area.x + ox, vSpacing, extent.x, extent.x + extent.w)) {
+      ops.push(vLine(extent, x, line));
     }
   }
   return ops;
@@ -243,7 +265,7 @@ function isometric(p: Of<'isometric'>, area: Rect, s: number, ox: number): Op[] 
 
 /* ---------------------------------------------------------------- hexagon */
 
-function hexagon(p: Of<'hexagon'>, area: Rect, s: number): Op[] {
+function hexagon(p: Of<'hexagon'>, area: Rect, extent: Rect, s: number): Op[] {
   const R = p.size * s;
   if (R < 0.3) return [];
   const pointy = p.orientation === 'pointy';
@@ -254,8 +276,8 @@ function hexagon(p: Of<'hexagon'>, area: Rect, s: number): Op[] {
   const colPitch = pointy ? Math.sqrt(3) * R : 1.5 * R;
   const rowPitch = pointy ? 1.5 * R : Math.sqrt(3) * R;
 
-  const cols = Math.ceil(area.w / colPitch) + 2;
-  const rows = Math.ceil(area.h / rowPitch) + 2;
+  const cols = Math.ceil(extent.w / colPitch) + 2;
+  const rows = Math.ceil(extent.h / rowPitch) + 2;
   if (cols * rows > 20000) return [];
 
   const ops: Op[] = [];
@@ -269,11 +291,11 @@ function hexagon(p: Of<'hexagon'>, area: Rect, s: number): Op[] {
         : area.y + row * rowPitch + (col % 2 === 0 ? 0 : rowPitch / 2);
 
       // Cheap reject before generating vertices.
-      if (cx + R < area.x || cx - R > area.x + area.w) continue;
-      if (cy + R < area.y || cy - R > area.y + area.h) continue;
+      if (cx + R < extent.x || cx - R > extent.x + extent.w) continue;
+      if (cy + R < extent.y || cy - R > extent.y + extent.h) continue;
 
       const pts = regularPolygon(cx, cy, R, 6, pointy ? -90 : 0);
-      ops.push(...clipPolygonEdges(pts, area, line, true));
+      ops.push(...clipPolygonEdges(pts, extent, line, true));
     }
   }
   return ops;
@@ -332,13 +354,20 @@ function clipSegment(
 
 /* --------------------------------------------------------------- triangle */
 
-function triangle(p: Of<'triangle'>, area: Rect, s: number, ox: number, oy: number): Op[] {
+function triangle(
+  p: Of<'triangle'>,
+  area: Rect,
+  extent: Rect,
+  s: number,
+  ox: number,
+  oy: number
+): Op[] {
   const spacing = p.spacing * s;
   const line = stroke(p.color, p.width * s);
   return [
-    ...parallelLines(area, 0, spacing * Math.sin((60 * Math.PI) / 180), line, oy),
-    ...parallelLines(area, 60, spacing * Math.sin((60 * Math.PI) / 180), line, ox),
-    ...parallelLines(area, -60, spacing * Math.sin((60 * Math.PI) / 180), line, ox),
+    ...parallelLines(extent, 0, spacing * Math.sin((60 * Math.PI) / 180), line, oy),
+    ...parallelLines(extent, 60, spacing * Math.sin((60 * Math.PI) / 180), line, ox),
+    ...parallelLines(extent, -60, spacing * Math.sin((60 * Math.PI) / 180), line, ox),
   ];
 }
 
@@ -381,7 +410,7 @@ function polar(p: Of<'polar'>, area: Rect, s: number): Op[] {
 
 /* --------------------------------------------------------------- logscale */
 
-function logscale(p: Of<'logscale'>, area: Rect, s: number): Op[] {
+function logscale(p: Of<'logscale'>, area: Rect, extent: Rect, s: number): Op[] {
   const minor = stroke(p.color, p.width * s);
   const major = stroke(p.majorColor, p.majorWidth * s);
   const ops: Op[] = [];
@@ -412,19 +441,19 @@ function logscale(p: Of<'logscale'>, area: Rect, s: number): Op[] {
   const yIsLog = p.kind === 'semilog-y' || p.kind === 'loglog';
 
   for (const t of (xIsLog ? logTicks : linTicks)(area.w)) {
-    ops.push(vLine(area, area.x + t.pos, t.major ? major : minor));
+    ops.push(vLine(extent, area.x + t.pos, t.major ? major : minor));
   }
   for (const t of (yIsLog ? logTicks : linTicks)(area.h)) {
     // Logarithmic axes read bottom-up, so mirror the offset.
     const y = yIsLog ? area.y + area.h - t.pos : area.y + t.pos;
-    ops.push(hLine(area, y, t.major ? major : minor));
+    ops.push(hLine(extent, y, t.major ? major : minor));
   }
   return ops;
 }
 
 /* ------------------------------------------------------------------ music */
 
-function music(p: Of<'music'>, area: Rect, s: number, oy: number): Op[] {
+function music(p: Of<'music'>, area: Rect, extent: Rect, s: number, oy: number): Op[] {
   const gap = p.lineSpacing * s;
   const staffHeight = gap * 4;
   const pitch = staffHeight + p.staffGap * s;
@@ -434,21 +463,21 @@ function music(p: Of<'music'>, area: Rect, s: number, oy: number): Op[] {
   for (let i = 0; i < p.staves; i++) {
     const top = area.y + oy + i * pitch;
     if (top + staffHeight > area.y + area.h + 1e-6) break;
-    for (let l = 0; l < 5; l++) ops.push(hLine(area, top + l * gap, line));
+    for (let l = 0; l < 5; l++) ops.push(hLine(extent, top + l * gap, line));
     // Opening barline, so the staff reads as a system rather than loose rules.
     ops.push({
       kind: 'line',
-      x1: area.x,
+      x1: extent.x,
       y1: top,
-      x2: area.x,
+      x2: extent.x,
       y2: top + staffHeight,
       stroke: line,
     });
     ops.push({
       kind: 'line',
-      x1: area.x + area.w,
+      x1: extent.x + extent.w,
       y1: top,
-      x2: area.x + area.w,
+      x2: extent.x + extent.w,
       y2: top + staffHeight,
       stroke: line,
     });
@@ -458,7 +487,7 @@ function music(p: Of<'music'>, area: Rect, s: number, oy: number): Op[] {
 
 /* ------------------------------------------------------------- tablature */
 
-function tablature(p: Of<'tablature'>, area: Rect, s: number, oy: number): Op[] {
+function tablature(p: Of<'tablature'>, area: Rect, extent: Rect, s: number, oy: number): Op[] {
   const gap = p.lineSpacing * s;
   const systemHeight = gap * (p.strings - 1);
   const pitch = systemHeight + p.systemGap * s;
@@ -468,8 +497,8 @@ function tablature(p: Of<'tablature'>, area: Rect, s: number, oy: number): Op[] 
   for (let i = 0; i < p.systems; i++) {
     const top = area.y + oy + i * pitch;
     if (top + systemHeight > area.y + area.h + 1e-6) break;
-    for (let l = 0; l < p.strings; l++) ops.push(hLine(area, top + l * gap, line));
-    for (const x of [area.x, area.x + area.w]) {
+    for (let l = 0; l < p.strings; l++) ops.push(hLine(extent, top + l * gap, line));
+    for (const x of [extent.x, extent.x + extent.w]) {
       ops.push({ kind: 'line', x1: x, y1: top, x2: x, y2: top + systemHeight, stroke: line });
     }
   }
@@ -478,7 +507,7 @@ function tablature(p: Of<'tablature'>, area: Rect, s: number, oy: number): Op[] 
 
 /* ----------------------------------------------------------- handwriting */
 
-function handwriting(p: Of<'handwriting'>, area: Rect, s: number, oy: number): Op[] {
+function handwriting(p: Of<'handwriting'>, area: Rect, extent: Rect, s: number, oy: number): Op[] {
   const band = p.bandHeight * s;
   const baseline = stroke(p.baselineColor, p.width * s);
   const guide = stroke(p.guideColor, p.width * s * 0.8);
@@ -493,11 +522,11 @@ function handwriting(p: Of<'handwriting'>, area: Rect, s: number, oy: number): O
     const xHeight = band * p.xHeightRatio;
     const midY = bottom - xHeight;
 
-    if (p.showAscender) ops.push(hLine(area, top, guide));
-    ops.push(hLine(area, midY, p.dashedMidline ? dashed : guide));
-    ops.push(hLine(area, bottom, baseline));
+    if (p.showAscender) ops.push(hLine(extent, top, guide));
+    ops.push(hLine(extent, midY, p.dashedMidline ? dashed : guide));
+    ops.push(hLine(extent, bottom, baseline));
     if (p.showDescender && bottom + xHeight / 2 <= area.y + area.h) {
-      ops.push(hLine(area, bottom + xHeight / 2, guide));
+      ops.push(hLine(extent, bottom + xHeight / 2, guide));
     }
   }
 
@@ -505,7 +534,7 @@ function handwriting(p: Of<'handwriting'>, area: Rect, s: number, oy: number): O
     // Slant guides lean forward, i.e. bottom-left to top-right.
     const angle = -(90 - p.slant.angleDeg);
     ops.push(
-      ...parallelLines(area, angle, p.slant.spacing * s, stroke(p.slant.color, p.width * s * 0.7))
+      ...parallelLines(extent, angle, p.slant.spacing * s, stroke(p.slant.color, p.width * s * 0.7))
     );
   }
   return ops;
@@ -513,7 +542,7 @@ function handwriting(p: Of<'handwriting'>, area: Rect, s: number, oy: number): O
 
 /* ------------------------------------------------------------------ seyes */
 
-function seyes(p: Of<'seyes'>, area: Rect, s: number): Op[] {
+function seyes(p: Of<'seyes'>, area: Rect, extent: Rect, s: number): Op[] {
   const unit = p.unit * s;
   const sub = unit / p.subDivisions;
   const main = stroke(p.mainColor, p.width * s);
@@ -522,11 +551,11 @@ function seyes(p: Of<'seyes'>, area: Rect, s: number): Op[] {
   const ops: Op[] = [];
 
   let index = 0;
-  for (let y = area.y; y <= area.y + area.h + 1e-9; y += sub, index++) {
-    ops.push(hLine(area, y, index % p.subDivisions === 0 ? main : light));
+  for (let y = extent.y; y <= extent.y + extent.h + 1e-9; y += sub, index++) {
+    ops.push(hLine(extent, y, index % p.subDivisions === 0 ? main : light));
   }
-  for (const x of ticks(area.x, p.verticalSpacing * s, area.x, area.x + area.w)) {
-    ops.push(vLine(area, x, vertical));
+  for (const x of ticks(area.x, p.verticalSpacing * s, extent.x, extent.x + extent.w)) {
+    ops.push(vLine(extent, x, vertical));
   }
   return ops;
 }
@@ -566,7 +595,7 @@ function genkoyoshi(p: Of<'genkoyoshi'>, area: Rect): Op[] {
 
 /* ----------------------------------------------------------- dotted thirds */
 
-function dottedThirds(p: Of<'dottedthirds'>, area: Rect, s: number, oy: number): Op[] {
+function dottedThirds(p: Of<'dottedthirds'>, area: Rect, extent: Rect, s: number, oy: number): Op[] {
   const band = p.bandHeight * s;
   const solid = stroke(p.color, p.width * s);
   const ops: Op[] = [];
@@ -576,10 +605,10 @@ function dottedThirds(p: Of<'dottedthirds'>, area: Rect, s: number, oy: number):
     const top = area.y + oy + i * band;
     const bottom = top + band;
     const mid = top + band / 2;
-    ops.push(hLine(area, top, solid));
-    ops.push(hLine(area, bottom, solid));
+    ops.push(hLine(extent, top, solid));
+    ops.push(hLine(extent, bottom, solid));
     ops.push(
-      hLine(area, mid, stroke(p.color, p.width * s, { dash: [p.dotSpacing * s, p.dotSpacing * s] }))
+      hLine(extent, mid, stroke(p.color, p.width * s, { dash: [p.dotSpacing * s, p.dotSpacing * s] }))
     );
   }
   return ops;

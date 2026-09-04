@@ -10,11 +10,14 @@ import type { Rect, Size } from '../units';
  * Corner crop marks: two short rules per corner, set back from the trim edge so
  * the blade line stays visible on the cut sheet.
  */
-export function cropMarks(rect: Rect, imposition: Imposition): Op[] {
+export function cropMarks(rect: Rect, imposition: Imposition, bleedMm = 0): Op[] {
   const cfg = imposition.cropMarks;
   if (!cfg.enabled) return [];
 
-  const { length: len, offset, color, width } = cfg;
+  // Marks are set back beyond the bleed so they stay on clean paper instead of
+  // drowning in the ruling that now runs past the trim edge.
+  const { length: len, color, width } = cfg;
+  const offset = cfg.offset + bleedMm;
   const stroke = { color, width };
   const ops: Op[] = [];
   const left = rect.x;
